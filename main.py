@@ -1,19 +1,38 @@
 import math
-import timeit
+import random
 
 
-# ======================== Manual Traditional Implementation ========================
-def manual_complex_add(z1_real, z1_imag, z2_real, z2_imag):
-    return z1_real + z2_real, z1_imag + z2_imag
+# ======================== Utilities ========================
+def rebase(num: int, base: int) -> tuple[list[int], bool]:
+    "converts an integer from base ten to given integer base"
+    digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    values, is_negative = [], False
+    if abs(base) < 2 or abs(base) > len(digits):
+        raise ValueError("invalid base")
+    if num < 0 and base > 0: num *= -1; is_negative = True
+    while num:
+        num, d = divmod(num, base)
+        if d < 0: num += 1; d -= base
+        values.append(d)
+    values.reverse()
+    return values, is_negative
 
 
-def manual_complex_mul(z1_real, z1_imag, z2_real, z2_imag):
-    real = z1_real * z2_real - z1_imag * z2_imag
-    imag = z1_real * z2_imag + z1_imag * z2_real
-    return real, imag
+def remove_leading_zeros(lst: list[int]) -> list[int]:
+    """Removes leading zeros from a list of integers."""
+    while lst and lst[0] == 0:
+        lst.pop(0)
+    return lst if lst else [0]
 
 
-# ======================== Traditional Complex (Python Built-in) ========================
+def remove_trailing_zeros(lst: list[int]) -> list[int]:
+    """Removes trailing zeros from a list of integers."""
+    while lst and lst[-1] == 0:
+        lst.pop()
+    return lst if lst else [0]
+
+
+# ======================== Complex (Python Built-in) ========================
 def traditional_add(z1, z2):
     return z1 + z2
 
@@ -120,158 +139,318 @@ def jminus1_mul(a_digits, b_digits):
 
 
 # ======================== Radix-2j System ========================
-def complex_to_radix2j(z, precision=8):
+def complex_to_radix2j(z: complex) -> tuple[list[int], list[int]]:
     real_part = int(z.real)
-    imag_part = int(z.imag / 2)
+    imag_part = math.ceil(z.imag / 2)
 
-    def to_base_neg4(n):
-        digits = []
-        while n != 0:
-            n, rem = divmod(n, -4)
-            if rem < 0:
-                n += 1
-                rem -= -4
-            digits.append(rem)
-        return digits[::-1] or [0]
+    real_part_neg_4 = rebase(real_part, -4)
+    imag_part_neg_4 = rebase(imag_part, -4)
 
-    real_digits = to_base_neg4(real_part)
-    imag_digits = to_base_neg4(imag_part)
+    if imag_part_neg_4[1] or real_part_neg_4[1]:
+        raise ValueError("Imaginary or real part cannot be negative in radix-2j representation. Something went wrong.")
 
-    max_len = max(len(real_digits), len(imag_digits))
-    interleaved = []
-    for i in range(max_len):
-        interleaved.append(real_digits[i] if i < len(real_digits) else 0)
-        interleaved.append(imag_digits[i] if i < len(imag_digits) else 0)
-    return interleaved[:precision]
+    result = []
+
+    for i in range(max(len(real_part_neg_4[0]), len(imag_part_neg_4[0]))):
+        try:
+            result.append(real_part_neg_4[0][-i - 1])
+        except IndexError:
+            result.append(0)
+
+        try:
+            result.append(imag_part_neg_4[0][-i - 1])
+        except IndexError:
+            result.append(0)
+
+    result.reverse()
+    return remove_leading_zeros(result), [2] if z.imag % 2 else []
 
 
-def radix2j_to_complex(digits):
+def radix2j_to_complex(integer_digits, fraction_digits):
     real = 0
     imag = 0
-    for i, d in enumerate(reversed(digits)):
-        weight = (-4) ** (i // 2)
+    for i, digit in enumerate(reversed(integer_digits)):
         if i % 2 == 0:
-            real += d * weight
+            real += digit * ((-4) ** (i // 2))
         else:
-            imag += d * weight * 2
+            imag += digit * ((-4) ** (i // 2)) * 2
+
+    for i, digit in enumerate(reversed(fraction_digits)):
+        if i % 2 == 0:
+            imag += digit * (1 / -4) ** ((i + 2) // 2) * 2
+        else:
+            real += digit * (1 / -4) ** ((i + 2) // 2)
+
     return complex(real, imag)
 
 
-def radix2j_add(a_digits, b_digits):
-    z1 = radix2j_to_complex(a_digits)
-    z2 = radix2j_to_complex(b_digits)
-    return complex_to_radix2j(z1 + z2)
+def radix2j_add(a: tuple[list[int], list[int]], b: tuple[list[int], list[int]]) -> tuple[list[int], list[int]]:
+    """
+    Add two numbers in radix-2j (quarter-imaginary) system.
+    
+    Rules:
+    - If digit > 3: subtract 4 and carry -1 two places to the left
+    - If digit < 0: add 4 and carry +1 two places to the left
+    """
+    a_int, a_frac = a
+    b_int, b_frac = b
+
+    # Pad integer parts to same length, add two to allow for extra carry
+    max_int_len = max(len(a_int), len(b_int)) + 4
+    a_int_padded = [0] * (max_int_len - len(a_int)) + a_int
+    b_int_padded = [0] * (max_int_len - len(b_int)) + b_int
+
+    # Pad fractional parts to same length
+    max_frac_len = max(len(a_frac), len(b_frac))
+    a_frac_padded = a_frac + [0] * (max_frac_len - len(a_frac))
+    b_frac_padded = b_frac + [0] * (max_frac_len - len(b_frac))
+
+    # Combine integer and fractional parts for processing
+    # Process from right to left (least significant to most significant)
+    combined_a = a_int_padded + a_frac_padded
+    combined_b = b_int_padded + b_frac_padded
+
+    result = [0] * len(combined_a)
+    carry = [0] * (len(combined_a) + 2)  # Extra space for carries
+
+    # Process from right to left
+    for i in range(len(combined_a) - 1, -1, -1):
+        # Add digits and any carry from two positions to the right
+        total = combined_a[i] + combined_b[i] + carry[i + 2]
+
+        # Apply quarter-imaginary rules
+        while total > 3:
+            total -= 4
+            carry[i] -= 1  # Carry -1 two places to the left
+
+        while total < 0:
+            total += 4
+            carry[i] += 1  # Carry +1 two places to the left
+
+        result[i] = total
+
+    # Handle any remaining carries to the left of the most significant digit
+    extra_digits = []
+    for i in range(1, -1, -1):  # Check positions 1 and 0 for leftmost carries
+        if carry[i] != 0:
+            digit = carry[i]
+            while digit > 3:
+                digit -= 4
+                if i > 0:
+                    carry[i - 1] -= 1
+                else:
+                    extra_digits.insert(0, -1)
+            while digit < 0:
+                digit += 4
+                if i > 0:
+                    carry[i - 1] += 1
+                else:
+                    extra_digits.insert(0, 1)
+            if digit != 0:
+                extra_digits.append(digit)
+
+    # Split back into integer and fractional parts
+    result_int = extra_digits + result[:max_int_len]
+    result_frac = result[max_int_len:]
+
+    # Remove leading zeros from integer part
+    result_int = remove_leading_zeros(result_int)
+
+    # Remove trailing zeros from fractional part
+    result_frac = remove_trailing_zeros(result_frac)
+
+    return result_int, result_frac
 
 
-def radix2j_mul(a_digits, b_digits):
-    z1 = radix2j_to_complex(a_digits)
-    z2 = radix2j_to_complex(b_digits)
-    return complex_to_radix2j(z1 * z2)
+def radix2j_mul(a: tuple[list[int], list[int]], b: tuple[list[int], list[int]]) -> tuple[list[int], list[int]]:
+    """
+    Multiply two numbers in radix-2j (quarter-imaginary) system using long multiplication.
+    
+    Algorithm following the long multiplication method:
+    1. For each digit in the multiplier (from right to left)
+    2. Multiply the multiplicand by that digit, creating a partial product
+    3. Shift each partial product by the appropriate number of positions
+    4. Add all partial products using radix-2j addition rules
+        """
+    a_int, a_frac = a
+    b_int, b_frac = b
 
+    # Handle special cases
+    if (not a_int or all(d == 0 for d in a_int)) and (not a_frac or all(d == 0 for d in a_frac)):
+        return [0], []
+    if (not b_int or all(d == 0 for d in b_int)) and (not b_frac or all(d == 0 for d in b_frac)):
+        return [0], []
 
-# ======================== Implementation Core ========================
-class ComplexSystems:
-    @staticmethod
-    # Manual Traditional Implementation
-    def manual_add(z1, z2):
-        return z1[0] + z2[0], z1[1] + z2[1]
+    # Combine digits for processing (integer part + fractional part)
+    a_combined = a_int + a_frac
+    b_combined = b_int + b_frac
 
-    @staticmethod
-    def manual_mul(z1, z2):
-        return z1[0] * z2[0] - z1[1] * z2[1], z1[0] * z2[1] + z1[1] * z2[0]
+    # Track the position of the "decimal point" in the result
+    result_frac_len = len(a_frac) + len(b_frac)
 
-    # Radix-j−1 Arithmetic
-    @staticmethod
-    def jminus1_add(a, b):
-        max_len = max(len(a), len(b))
-        a += [0] * (max_len - len(a))
-        b += [0] * (max_len - len(b))
-        result = []
-        carry1 = carry2 = 0
-        for i in range(max_len):
-            sum_digit = a[i] + b[i] + carry1
-            carry1 = 0
-            while sum_digit < 0:
-                sum_digit += 2
-                carry1 -= 1
-            while sum_digit >= 2:
-                sum_digit -= 2
-                carry1 += 1
-            result.append(sum_digit)
-            carry1, carry2 = carry2, carry1
-        while carry1 or carry2:
-            sum_digit = carry1
-            carry1 = 0
-            while sum_digit < 0:
-                sum_digit += 2
-                carry1 -= 1
-            while sum_digit >= 2:
-                sum_digit -= 2
-                carry1 += 1
-            result.append(sum_digit)
-            carry1, carry2 = carry2, carry1
-        return result
+    partial_products = []
 
-    @staticmethod
-    def jminus1_mul(a, b):
-        partials = []
-        for i, digit in enumerate(b):
-            partial = [0] * i + [digit * d for d in a]
-            partials.append(partial)
-        result = []
-        for p in partials:
-            result = ComplexSystems.jminus1_add(result, p)
-        return result
+    # Generate partial products using long multiplication
+    for i, b_digit in enumerate(reversed(b_combined)):
+        if b_digit == 0:
+            # Skip zero digits to avoid unnecessary computation
+            continue
+
+        # Create partial product: multiply a_combined by b_digit
+        partial = []
+        carry = 0
+
+        # Multiply each digit of a by the current digit of b
+        for a_digit in reversed(a_combined):
+            product = a_digit * b_digit + carry
+            partial.append(product)  # Store the raw product temporarily
+            carry = 0  # Reset carry for radix-2j (we'll handle normalization later)
+
+        # Reverse to get correct order (most significant first)
+        partial.reverse()
+
+        # Shift partial product by i positions to the right (multiply by (2j)^i)
+        shifted_partial = partial + [0] * i
+
+        # Convert to (integer, fractional) format
+        if result_frac_len >= len(shifted_partial):
+            # All digits are in fractional part
+            p_int = [0]
+            p_frac = [0] * (result_frac_len - len(shifted_partial)) + shifted_partial
+        else:
+            # Split between integer and fractional parts
+            split_pos = len(shifted_partial) - result_frac_len
+            p_int = shifted_partial[:split_pos] if split_pos > 0 else [0]
+            p_frac = shifted_partial[split_pos:] if split_pos < len(shifted_partial) else []
+
+        partial_products.append((p_int, p_frac))
+
+    # Sum all partial products using radix-2j addition
+    if not partial_products:
+        return [0], []
+
+    result = partial_products[0]
+    for i in range(1, len(partial_products)):
+        result = radix2j_add(result, partial_products[i])
+
+    return result
 
 
 # ======================== Benchmark Setup ========================
 def full_benchmark():
-    z = complex(3, 4)
-    z1, z2 = complex(3, 4), complex(2, 5)
+    # z = complex(-14, -5)
+    # print(z)
+    # print(complex_to_radix2j(z))
+    # print(radix2j_to_complex(*complex_to_radix2j(z)))
 
-    # Traditional Native
-    native_add = timeit.timeit(lambda: z1 + z2, number=100000)
-    native_mul = timeit.timeit(lambda: z1 * z2, number=100000)
-    native_conv = timeit.timeit(lambda: complex(3, 4), number=100000)
+    # Test radix2j addition with the examples from the description
+    print("Testing radix-2j addition implementation:")
 
-    # Manual Traditional
-    manual_conv = timeit.timeit(lambda: (3.0, 4.0), number=100000)
-    manual_add = timeit.timeit(lambda: ComplexSystems.manual_add((3, 4), (2, 5)), number=100000)
-    manual_mul = timeit.timeit(lambda: ComplexSystems.manual_mul((3, 4), (2, 5)), number=100000)
+    z1 = complex(-10, -8)
+    z2 = complex(-4, 3)
+    expected = z1 + z2
 
-    # Radix-j√2
-    jsqrt2_conv = timeit.timeit(lambda: complex_to_jsqrt2(z), number=1000)
-    jsqrt2_add_t = timeit.timeit(
-        lambda: jsqrt2_add(*complex_to_jsqrt2(z1), *complex_to_jsqrt2(z2)),
-        number=1000
-    )
-    jsqrt2_mul_t = timeit.timeit(
-        lambda: jsqrt2_mul(*complex_to_jsqrt2(z1), *complex_to_jsqrt2(z2)),
-        number=1000
-    )
+    r2j_z1 = complex_to_radix2j(z1)
+    r2j_z2 = complex_to_radix2j(z2)
+    r2j_result = radix2j_add(r2j_z1, r2j_z2)
+    result_complex = radix2j_to_complex(*r2j_result)
 
-    # Radix-j−1
-    jm1 = complex_to_jminus1(z1)
-    jm2 = complex_to_jminus1(z2)
-    jminus1_conv = timeit.timeit(lambda: complex_to_jminus1(z1), number=100)
-    jminus1_add_t = timeit.timeit(lambda: ComplexSystems.jminus1_add(jm1, jm2), number=100)
-    jminus1_mul_t = timeit.timeit(lambda: ComplexSystems.jminus1_mul(jm1, jm2), number=10)
+    print(f"Test 1: {z1} + {z2} = {expected}")
+    print(f"Radix-2j: {r2j_z1} + {r2j_z2} = {r2j_result}")
+    print(f"Expected radix-2j result: {complex_to_radix2j(expected)}")
+    print(f"Back to complex: {result_complex}")
+    print(f"Correct: {abs(result_complex - expected) < 1e-10}")
+    print()
 
-    # Radix-2j
-    r2j_conv = timeit.timeit(lambda: complex_to_radix2j(z1), number=1000)
-    r2j_add_t = timeit.timeit(lambda: radix2j_add(*map(complex_to_radix2j, [z1, z2])), number=1000)
-    r2j_mul_t = timeit.timeit(lambda: radix2j_mul(*map(complex_to_radix2j, [z1, z2])), number=1000)
+    # Example 2: (3-4i) + (1-8i) = (4-12i)
+    # In radix-2j: 1023 + 1001 = 12320
+    z3 = complex(3, -4)
+    z4 = complex(1, -8)
+    expected2 = complex(4, -12)
 
-    # Formatting
-    def fmt(time, ops):
-        return f"{(time * 1e6) / ops:.2f} μs" if time else "N/A"
+    r2j_z3 = complex_to_radix2j(z3)
+    r2j_z4 = complex_to_radix2j(z4)
+    r2j_result2 = radix2j_add(r2j_z3, r2j_z4)
+    result_complex2 = radix2j_to_complex(*r2j_result2)
 
-    print(f"{'System':<12} {'Convert':<12} {'Add':<12} {'Multiply':<12}")
-    print(f"{'Native':<12} {fmt(native_conv, 100000):<12} {fmt(native_add, 100000):<12} {fmt(native_mul, 100000):<12}")
-    print(f"{'Manual':<12} {fmt(manual_conv, 100000):<12} {fmt(manual_add, 100000):<12} {fmt(manual_mul, 100000):<12}")
-    print(f"{'Radix-j√2':<12} {fmt(jsqrt2_conv, 1000):<12} {fmt(jsqrt2_add_t, 1000):<12} {fmt(jsqrt2_mul_t, 1000):<12}")
-    print(f"{'Radix-j−1':<12} {fmt(jminus1_conv, 100):<12} {fmt(jminus1_add_t, 100):<12} {fmt(jminus1_mul_t, 10):<12}")
-    print(f"{'Radix-2j':<12} {fmt(r2j_conv, 1000):<12} {fmt(r2j_add_t, 1000):<12} {fmt(r2j_mul_t, 1000):<12}")
+    print(f"Test 2: {z3} + {z4} = {expected2}")
+    print(f"Radix-2j: {r2j_z3} + {r2j_z4} = {r2j_result2}")
+    print(f"Back to complex: {result_complex2}")
+    print(f"Correct: {abs(result_complex2 - expected2) < 1e-10}")
+    print()
+
+    # Additional random tests
+    print("Random tests:")
+    incorrect_count = 0
+    for i in range(50000):
+        z_a = complex(random.randint(-1000, 1000), random.randint(-1000, 1000))
+        z_b = complex(random.randint(-1000, 1000), random.randint(-1000, 1000))
+        expected = z_a * z_b
+
+        try:
+            r2j_a = complex_to_radix2j(z_a)
+            r2j_b = complex_to_radix2j(z_b)
+            r2j_mul = radix2j_mul(r2j_a, r2j_b)
+            result = radix2j_to_complex(*r2j_mul)
+
+            print(f"{z_a} * {z_b} = {expected}")
+            print(f"Radix-2j result: {result}")
+            print(f"Correct: {abs(result - expected) < 1e-10}")
+            if abs(result - expected) >= 1e-10:
+                incorrect_count += 1
+            print()
+        except Exception as e:
+            print(f"Error with {z_a} * {z_b}: {e}")
+            print()
+
+    print(f"Total incorrect results: {incorrect_count} out of {i + 1} random tests.")
+    print(f"Success rate: {((i + 1) - incorrect_count) / (i + 1) * 100:.2f}%")
+
+    # z1, z2 = complex(3, 4), complex(2, 5)
+    #
+    # # Traditional Native
+    # native_add = timeit.timeit(lambda: z1 + z2, number=100000)
+    # native_mul = timeit.timeit(lambda: z1 * z2, number=100000)
+    # native_conv = timeit.timeit(lambda: complex(3, 4), number=100000)
+    #
+    # # Manual Traditional
+    # manual_conv = timeit.timeit(lambda: (3.0, 4.0), number=100000)
+    # manual_add = timeit.timeit(lambda: ComplexSystems.manual_add((3, 4), (2, 5)), number=100000)
+    # manual_mul = timeit.timeit(lambda: ComplexSystems.manual_mul((3, 4), (2, 5)), number=100000)
+    #
+    # # Radix-j√2
+    # jsqrt2_conv = timeit.timeit(lambda: complex_to_jsqrt2(z), number=1000)
+    # jsqrt2_add_t = timeit.timeit(
+    #     lambda: jsqrt2_add(*complex_to_jsqrt2(z1), *complex_to_jsqrt2(z2)),
+    #     number=1000
+    # )
+    # jsqrt2_mul_t = timeit.timeit(
+    #     lambda: jsqrt2_mul(*complex_to_jsqrt2(z1), *complex_to_jsqrt2(z2)),
+    #     number=1000
+    # )
+    #
+    # # Radix-j−1
+    # jm1 = complex_to_jminus1(z1)
+    # jm2 = complex_to_jminus1(z2)
+    # jminus1_conv = timeit.timeit(lambda: complex_to_jminus1(z1), number=100)
+    # jminus1_add_t = timeit.timeit(lambda: ComplexSystems.jminus1_add(jm1, jm2), number=100)
+    # jminus1_mul_t = timeit.timeit(lambda: ComplexSystems.jminus1_mul(jm1, jm2), number=10)
+    #
+    # # Radix-2j
+    # r2j_conv = timeit.timeit(lambda: complex_to_radix2j(z1), number=1000)
+    # r2j_add_t = timeit.timeit(lambda: radix2j_add(*map(complex_to_radix2j, [z1, z2])), number=1000)
+    # r2j_mul_t = timeit.timeit(lambda: radix2j_mul(*map(complex_to_radix2j, [z1, z2])), number=1000)
+    #
+    # # Formatting
+    # def fmt(time, ops):
+    #     return f"{(time * 1e6) / ops:.2f} μs" if time else "N/A"
+    #
+    # print(f"{'System':<12} {'Convert':<12} {'Add':<12} {'Multiply':<12}")
+    # print(f"{'Native':<12} {fmt(native_conv, 100000):<12} {fmt(native_add, 100000):<12} {fmt(native_mul, 100000):<12}")
+    # print(f"{'Manual':<12} {fmt(manual_conv, 100000):<12} {fmt(manual_add, 100000):<12} {fmt(manual_mul, 100000):<12}")
+    # print(f"{'Radix-j√2':<12} {fmt(jsqrt2_conv, 1000):<12} {fmt(jsqrt2_add_t, 1000):<12} {fmt(jsqrt2_mul_t, 1000):<12}")
+    # print(f"{'Radix-j−1':<12} {fmt(jminus1_conv, 100):<12} {fmt(jminus1_add_t, 100):<12} {fmt(jminus1_mul_t, 10):<12}")
+    # print(f"{'Radix-2j':<12} {fmt(r2j_conv, 1000):<12} {fmt(r2j_add_t, 1000):<12} {fmt(r2j_mul_t, 1000):<12}")
 
 
 if __name__ == "__main__":
