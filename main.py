@@ -513,7 +513,7 @@ class BinaryComplexSystem(ComplexNumberSystem):
 
     @property
     def name(self) -> str:
-        return f"Binary Complex (dynamic)"
+        return "Binary Complex"
 
 
 def run_benchmark(iterations: int = 1000, num_runs: int = 10, 
@@ -766,4 +766,6 @@ def run_tests():
         print(f"Success rate: {(TEST_COUNT - incorrect_count) / TEST_COUNT * 100:.2f}%")
 
 if __name__ == "__main__":
-    run_tests()
+    # run_tests()
+
+    run_benchmark(iterations=1000, num_runs=5, min_val=-1000, max_val=1000)
