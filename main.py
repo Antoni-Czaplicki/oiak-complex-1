@@ -292,9 +292,6 @@ class RadixJSqrt2System(GenericRadixComplexSystem):
 class RadixJMinus1System(ComplexNumberSystem):
     """Radix-j−1 complex number system"""
 
-    def __init__(self, bits: int = 8):
-        self.bits = bits  # Keep for compatibility, but make it adaptive
-
     def from_complex(self, z: complex) -> List[int]:
         """Convert complex number to radix-j−1 representation using Euclidean division"""
         # Validate input is a Gaussian integer
@@ -315,8 +312,8 @@ class RadixJMinus1System(ComplexNumberSystem):
         # Calculate maximum possible bits needed based on input magnitude
         # Use the maximum of real and imaginary parts to estimate bit length
         max_component = max(abs(int(current.real)), abs(int(current.imag)))
-        max_bits = max(self.bits, max_component.bit_length() * 2 + 10) if max_component > 0 else self.bits
-        
+        max_bits = max_component.bit_length() * 2 + 10
+
         # Euclidean division algorithm
         while current != 0 and len(digits) < max_bits:
             # Divide current by base
@@ -559,8 +556,7 @@ def run_benchmark(iterations: int = 1000, num_runs: int = 10,
         BinaryComplexSystem(32),
         Radix2jSystem(),
         RadixJSqrt2System(),
-        RadixJMinus1System(8),
-        RadixJMinus1System(16)
+        RadixJMinus1System()
     ]
     
     # Operations to benchmark
@@ -726,10 +722,10 @@ def run_tests():
     OPERATION = "multiply"  # Choose "add" or "multiply"
     MIN_RANDOM = -1000  # Minimum value for random numbers
     MAX_RANDOM = 1000   # Maximum value for random numbers
-    TEST_COUNT = 10000  # Number of random tests to run
+    TEST_COUNT = 0  # Number of random tests to run
     VERBOSE = False   # Set to True for detailed output of each test
 
-    current_system = RadixJSqrt2System()
+    current_system = BinaryComplexSystem()
 
     # # test conversion
     c = complex(83, 479)
@@ -777,22 +773,23 @@ def run_tests():
         expected = z1 * z2
         operation_symbol = "*"
 
-    r2j_z1 = current_system.from_complex(z1)
-    r2j_z2 = current_system.from_complex(z2)
+    ts_z1 = current_system.from_complex(z1)
+    ts_z2 = current_system.from_complex(z2)
 
     if OPERATION == "add":
-        r2j_result = current_system.add(r2j_z1, r2j_z2)
+        ts_result = current_system.add(ts_z1, ts_z2)
     else:  # multiply
-        r2j_result = current_system.multiply(r2j_z1, r2j_z2)
+        ts_result = current_system.multiply(ts_z1, ts_z2)
 
-    result_complex = current_system.to_complex(r2j_result)
+    result_complex = current_system.to_complex(ts_result)
 
     print(f"Fixed test: {z1} {operation_symbol} {z2} = {expected}")
-    print(f"Radix-2j: {r2j_z1} {operation_symbol} {r2j_z2} = {r2j_result}")
-    print(f"Expected radix-2j result: {current_system.from_complex(expected)}")
+    print(f"{current_system.name}: {ts_z1} {operation_symbol} {ts_z2} = {ts_result}")
+    print(f"Expected {current_system.name} result: {current_system.from_complex(expected)}")
     print(f"Back to complex: {result_complex}")
     print(f"Correct: {abs(result_complex - expected) < 1e-10}")
     print()
+
 
     # Random tests
     if TEST_COUNT > 0:
@@ -811,12 +808,12 @@ def run_tests():
 
             if OPERATION == "add":
                 expected_result = z_a + z_b
-                r2j_result = current_system.add(r2j_a, r2j_b)
+                ts_result = current_system.add(r2j_a, r2j_b)
             else:  # multiply
                 expected_result = z_a * z_b
-                r2j_result = current_system.multiply(r2j_a, r2j_b)
+                ts_result = current_system.multiply(r2j_a, r2j_b)
 
-            result = current_system.to_complex(r2j_result)
+            result = current_system.to_complex(ts_result)
             is_correct = abs(result - expected_result) < 1e-10
 
             if VERBOSE:
@@ -843,7 +840,7 @@ def run_tests():
 if __name__ == "__main__":
     # Run the benchmark
     # print("Starting benchmark...")
-    # run_benchmark(iterations=1000, num_runs=5, min_val=-10, max_val=10)
+    # run_benchmark(iterations=1000, num_runs=5, min_val=-1000, max_val=1000)
     
     # print("\n" + "=" * 80)
     # print("Running original tests...")
