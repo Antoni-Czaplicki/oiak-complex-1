@@ -1,5 +1,8 @@
 import math
 import random
+import time
+import statistics
+import csv
 from abc import ABC, abstractmethod
 from typing import Any, Tuple, List
 
@@ -290,73 +293,118 @@ class RadixJMinus1System(ComplexNumberSystem):
     """Radix-j−1 complex number system"""
 
     def __init__(self, bits: int = 8):
-        self.bits = bits
+        self.bits = bits  # Keep for compatibility, but make it adaptive
 
     def from_complex(self, z: complex) -> List[int]:
-        """Convert complex number to radix-j−1 representation"""
-        a = int(z.real)
-        b = int(z.imag)
+        """Convert complex number to radix-j−1 representation using Euclidean division"""
+        # Validate input is a Gaussian integer
+        if (abs(z.real - round(z.real)) > 1e-10 or 
+            abs(z.imag - round(z.imag)) > 1e-10):
+            raise ValueError("Input must be a Gaussian integer (integer real and imaginary parts)")
+        
+        if z == 0:
+            return [0]
+        
+        # Base is j-1 = -1+i
+        base = -1 + 1j
+        
+        # Start with rounded Gaussian integer
+        current = complex(round(z.real), round(z.imag))
         digits = []
-
-        for _ in range(self.bits):
-            r = (a + b) % 2
-            digits.append(r)
-            y = (r - a - b) // 2
-            x = b + y
-            a, b = x, y
-
-        return digits[::-1]
+        
+        # Calculate maximum possible bits needed based on input magnitude
+        # Use the maximum of real and imaginary parts to estimate bit length
+        max_component = max(abs(int(current.real)), abs(int(current.imag)))
+        max_bits = max(self.bits, max_component.bit_length() * 2 + 10) if max_component > 0 else self.bits
+        
+        # Euclidean division algorithm
+        while current != 0 and len(digits) < max_bits:
+            # Divide current by base
+            quotient_raw = current / base
+            
+            # Round to nearest Gaussian integer
+            q_real = round(quotient_raw.real)
+            q_imag = round(quotient_raw.imag)
+            quotient = complex(q_real, q_imag)
+            
+            # Calculate remainder: current = quotient * base + remainder
+            remainder = current - quotient * base
+            
+            # For base (-1+i), remainder should be 0 or 1
+            # Round remainder to handle floating point precision
+            r_real = round(remainder.real)
+            r_imag = round(remainder.imag)
+            
+            # Determine digit based on remainder
+            if abs(r_real) < 1e-10 and abs(r_imag) < 1e-10:
+                digit = 0
+            elif abs(r_real - 1) < 1e-10 and abs(r_imag) < 1e-10:
+                digit = 1
+            else:
+                # Handle edge cases by trying both possible digits
+                best_digit = 0
+                best_error = float('inf')
+                
+                for test_digit in [0, 1]:
+                    test_quotient = (current - test_digit) / base
+                    test_q = complex(round(test_quotient.real), round(test_quotient.imag))
+                    test_remainder = current - test_q * base - test_digit
+                    error = abs(test_remainder)
+                    
+                    if error < best_error:
+                        best_error = error
+                        best_digit = test_digit
+                        quotient = test_q
+                
+                digit = best_digit
+            
+            digits.append(digit)
+            current = quotient
+        
+        # Safety check
+        if len(digits) >= max_bits and current != 0:
+            raise RuntimeError("Conversion algorithm failed to converge within reasonable bounds")
+        
+        # Digits are generated in reverse order, so reverse them
+        digits.reverse()
+        
+        # Remove leading zeros but keep at least one digit
+        while len(digits) > 1 and digits[0] == 0:
+            digits.pop(0)
+            
+        return digits
 
     def to_complex(self, representation: List[int]) -> complex:
         """Convert radix-j−1 representation to complex number"""
-        digits = representation
-        z = 0
+        if not representation or all(d == 0 for d in representation):
+            return 0 + 0j
+        
         base = -1 + 1j
-
-        for digit in reversed(digits):
-            z = z * base + digit
-
-        return z
+        result = 0 + 0j
+        
+        # Evaluate polynomial in base (-1+i)
+        # Most significant digit is first in our representation
+        for position, digit in enumerate(reversed(representation)):
+            if digit == 1:
+                result += base ** position
+        
+        return result
 
     def add(self, a: List[int], b: List[int]) -> List[int]:
-        """Add two numbers in radix-j−1 system"""
-        max_len = max(len(a), len(b))
-        a_padded = a + [0] * (max_len - len(a))
-        b_padded = b + [0] * (max_len - len(b))
-
-        result = []
-        carry = 0
-
-        for i in range(max_len):
-            total = a_padded[i] + b_padded[i] + carry
-            if total >= 2:
-                result.append(total - 2)
-                carry = 1
-            elif total < 0:
-                result.append(total + 2)
-                carry = -1
-            else:
-                result.append(total)
-                carry = 0
-
-        if carry != 0:
-            result.append(carry)
-
-        return result
+        """Add two numbers in radix-j−1 system using native arithmetic"""
+        # Convert to complex, add, then convert back
+        complex_a = self.to_complex(a)
+        complex_b = self.to_complex(b)
+        result_complex = complex_a + complex_b
+        return self.from_complex(result_complex)
 
     def multiply(self, a: List[int], b: List[int]) -> List[int]:
-        """Multiply two numbers in radix-j−1 system"""
-        partials = []
-
-        for i, digit in enumerate(b):
-            partial = [0] * i + [d * digit for d in a]
-            partials.append(partial)
-
-        result = []
-        for p in partials:
-            result = self.add(result, p)
-
-        return result
+        """Multiply two numbers in radix-j−1 system using native arithmetic"""
+        # Convert to complex, multiply, then convert back
+        complex_a = self.to_complex(a)
+        complex_b = self.to_complex(b)
+        result_complex = complex_a * complex_b
+        return self.from_complex(result_complex)
 
     @property
     def name(self) -> str:
@@ -375,16 +423,318 @@ class Radix2jSystem(GenericRadixComplexSystem):
         return "Radix-2j"
 
 
+# ======================== Binary Complex System ========================
+class BinaryComplexSystem(ComplexNumberSystem):
+    """Binary representation of complex numbers using two's complement"""
+
+    def __init__(self, bits: int = 16):
+        """Initialize with specified bit width (default 16 bits per component)"""
+        self.bits = bits
+        self.max_val = (1 << (bits - 1)) - 1  # Maximum positive value
+        self.min_val = -(1 << (bits - 1))     # Minimum negative value
+
+    def _int_to_binary(self, num: int) -> List[int]:
+        """Convert integer to binary list using two's complement"""
+        # Clamp to valid range
+        num = max(self.min_val, min(self.max_val, num))
+        
+        if num >= 0:
+            # Positive number: standard binary
+            binary = [(num >> i) & 1 for i in range(self.bits)]
+        else:
+            # Negative number: two's complement
+            num = (1 << self.bits) + num  # Add 2^bits to get two's complement
+            binary = [(num >> i) & 1 for i in range(self.bits)]
+        
+        return binary
+
+    def _binary_to_int(self, binary: List[int]) -> int:
+        """Convert binary list to integer using two's complement"""
+        if len(binary) != self.bits:
+            binary = binary[:self.bits] + [0] * max(0, self.bits - len(binary))
+        
+        # Calculate value
+        value = sum(bit * (1 << i) for i, bit in enumerate(binary))
+        
+        # Handle two's complement for negative numbers
+        if binary[self.bits - 1] == 1:  # Sign bit is set
+            value -= 1 << self.bits
+            
+        return value
+
+    def from_complex(self, z: complex) -> Tuple[List[int], List[int]]:
+        """Convert complex number to binary representation (real_bits, imag_bits)"""
+        real_part = int(round(z.real))
+        imag_part = int(round(z.imag))
+        
+        real_binary = self._int_to_binary(real_part)
+        imag_binary = self._int_to_binary(imag_part)
+        
+        return real_binary, imag_binary
+
+    def to_complex(self, representation: Tuple[List[int], List[int]]) -> complex:
+        """Convert binary representation to complex number"""
+        real_binary, imag_binary = representation
+        
+        real_part = self._binary_to_int(real_binary)
+        imag_part = self._binary_to_int(imag_binary)
+        
+        return complex(real_part, imag_part)
+
+    def _binary_add(self, a: List[int], b: List[int]) -> List[int]:
+        """Add two binary numbers with carry propagation"""
+        result = [0] * self.bits
+        carry = 0
+        
+        for i in range(self.bits):
+            total = a[i] + b[i] + carry
+            result[i] = total & 1
+            carry = total >> 1
+            
+        return result
+
+    def _binary_multiply(self, a: List[int], b: List[int]) -> List[int]:
+        """Multiply two binary numbers (simplified - may overflow)"""
+        # Convert to integers, multiply, then convert back
+        # This is a simplified implementation
+        int_a = self._binary_to_int(a)
+        int_b = self._binary_to_int(b)
+        product = int_a * int_b
+        
+        return self._int_to_binary(product)
+
+    def add(self, a: Tuple[List[int], List[int]], b: Tuple[List[int], List[int]]) -> Tuple[List[int], List[int]]:
+        """Add two complex numbers in binary representation"""
+        a_real, a_imag = a
+        b_real, b_imag = b
+        
+        result_real = self._binary_add(a_real, b_real)
+        result_imag = self._binary_add(a_imag, b_imag)
+        
+        return result_real, result_imag
+
+    def multiply(self, a: Tuple[List[int], List[int]], b: Tuple[List[int], List[int]]) -> Tuple[List[int], List[int]]:
+        """Multiply two complex numbers in binary representation"""
+        a_real, a_imag = a
+        b_real, b_imag = b
+        
+        # (a + bi) * (c + di) = (ac - bd) + (ad + bc)i
+        ac = self._binary_multiply(a_real, b_real)
+        bd = self._binary_multiply(a_imag, b_imag)
+        ad = self._binary_multiply(a_real, b_imag)
+        bc = self._binary_multiply(a_imag, b_real)
+        
+        # Convert bd to negative for subtraction (two's complement)
+        bd_neg = self._int_to_binary(-self._binary_to_int(bd))
+        
+        result_real = self._binary_add(ac, bd_neg)  # ac - bd
+        result_imag = self._binary_add(ad, bc)      # ad + bc
+        
+        return result_real, result_imag
+
+    @property
+    def name(self) -> str:
+        return f"Binary Complex ({self.bits}-bit)"
+
+
+# ======================== Benchmarking Functions ========================
+def run_benchmark(iterations: int = 1000, num_runs: int = 10, 
+                  min_val: int = -10, max_val: int = 10,
+                  csv_filename: str = "benchmark_results.csv"):
+    """
+    Comprehensive benchmark of all complex number systems.
+    
+    Args:
+        iterations: Number of operations per run
+        num_runs: Number of benchmark runs for statistical analysis
+        min_val: Minimum value for random complex numbers
+        max_val: Maximum value for random complex numbers
+        csv_filename: Name of CSV file to save detailed results
+    """
+    
+    # Initialize all systems
+    systems = [
+        TraditionalComplexSystem(),
+        BinaryComplexSystem(16),
+        BinaryComplexSystem(32),
+        Radix2jSystem(),
+        RadixJSqrt2System(),
+        RadixJMinus1System(8),
+        RadixJMinus1System(16)
+    ]
+    
+    # Operations to benchmark
+    operations = ['from_complex', 'to_complex', 'add', 'multiply']
+    
+    # Store all results for CSV
+    csv_data = []
+    
+    # Store simplified results for table display
+    results_summary = {}
+    
+    print("Running comprehensive benchmark...")
+    print(f"Iterations per run: {iterations}")
+    print(f"Number of runs: {num_runs}")
+    print(f"Value range: {min_val} to {max_val}")
+    print("=" * 80)
+    
+    for system in systems:
+        print(f"Benchmarking {system.name}...")
+        results_summary[system.name] = {}
+        
+        for operation in operations:
+            operation_times = []
+            
+            for run in range(num_runs):
+                # Generate test data for this run
+                test_data = []
+                for _ in range(iterations):
+                    z1 = complex(random.randint(min_val, max_val), 
+                                random.randint(min_val, max_val))
+                    z2 = complex(random.randint(min_val, max_val), 
+                                random.randint(min_val, max_val))
+                    test_data.append((z1, z2))
+                
+                # Time the operation
+                start_time = time.perf_counter()
+                
+                try:
+                    if operation == 'from_complex':
+                        for z1, _ in test_data:
+                            system.from_complex(z1)
+                    
+                    elif operation == 'to_complex':
+                        # Pre-convert for to_complex timing
+                        converted_data = []
+                        for z1, _ in test_data:
+                            try:
+                                converted_data.append(system.from_complex(z1))
+                            except:
+                                continue
+                        
+                        start_time = time.perf_counter()  # Reset timer
+                        for rep in converted_data:
+                            system.to_complex(rep)
+                    
+                    elif operation == 'add':
+                        for z1, z2 in test_data:
+                            try:
+                                rep1 = system.from_complex(z1)
+                                rep2 = system.from_complex(z2)
+                                system.add(rep1, rep2)
+                            except:
+                                continue
+                    
+                    elif operation == 'multiply':
+                        for z1, z2 in test_data:
+                            try:
+                                rep1 = system.from_complex(z1)
+                                rep2 = system.from_complex(z2)
+                                system.multiply(rep1, rep2)
+                            except:
+                                continue
+                
+                except Exception as e:
+                    print(f"  Error in {operation}: {e}")
+                    continue
+                
+                end_time = time.perf_counter()
+                operation_time = (end_time - start_time) * 1_000_000  # Convert to microseconds
+                operation_times.append(operation_time)
+            
+            # Calculate statistics
+            if operation_times:
+                avg_time = statistics.mean(operation_times)
+                min_time = min(operation_times)
+                max_time = max(operation_times)
+                total_time = sum(operation_times)
+                std_dev = statistics.stdev(operation_times) if len(operation_times) > 1 else 0
+                median_time = statistics.median(operation_times)
+                
+                # Store for summary table
+                results_summary[system.name][operation] = avg_time
+                
+                # Store detailed data for CSV
+                csv_data.append({
+                    'system': system.name,
+                    'operation': operation,
+                    'iterations': iterations,
+                    'num_runs': num_runs,
+                    'avg_time_us': avg_time,
+                    'min_time_us': min_time,
+                    'max_time_us': max_time,
+                    'total_time_us': total_time,
+                    'std_dev_us': std_dev,
+                    'median_time_us': median_time,
+                    'time_per_operation_us': avg_time / iterations,
+                    'operations_per_second': (iterations * 1_000_000) / avg_time if avg_time > 0 else 0
+                })
+            else:
+                results_summary[system.name][operation] = float('inf')  # Indicate failure
+    
+    # Display simplified summary table
+    print("\n" + "=" * 80)
+    print("BENCHMARK SUMMARY (Average time in microseconds)")
+    print("=" * 80)
+    
+    # Header
+    header = f"{'System':<25} {'from_complex':<12} {'to_complex':<12} {'add':<12} {'multiply':<12}"
+    print(header)
+    print("-" * len(header))
+    
+    # Data rows
+    for system_name, operations_data in results_summary.items():
+        from_complex_time = operations_data.get('from_complex', float('inf'))
+        to_complex_time = operations_data.get('to_complex', float('inf'))
+        add_time = operations_data.get('add', float('inf'))
+        multiply_time = operations_data.get('multiply', float('inf'))
+        
+        # Format times
+        def format_time(t):
+            if t == float('inf'):
+                return "FAILED"
+            elif t < 1:
+                return f"{t:.3f}"
+            elif t < 10:
+                return f"{t:.2f}"
+            elif t < 100:
+                return f"{t:.1f}"
+            else:
+                return f"{int(t)}"
+        
+        row = f"{system_name:<25} {format_time(from_complex_time):<12} {format_time(to_complex_time):<12} {format_time(add_time):<12} {format_time(multiply_time):<12}"
+        print(row)
+    
+    # Save detailed results to CSV
+    print(f"\nSaving detailed results to {csv_filename}...")
+    
+    with open(csv_filename, 'w', newline='') as csvfile:
+        if csv_data:
+            fieldnames = csv_data[0].keys()
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(csv_data)
+    
+    print(f"Detailed benchmark results saved to {csv_filename}")
+    print("\nCSV contains: system, operation, avg/min/max/total/std_dev/median times,")
+    print("             time per operation, and operations per second")
+    
+
 # ======================== Benchmark Setup ========================
 def run_tests():
     # Configuration constants
     OPERATION = "multiply"  # Choose "add" or "multiply"
-    MIN_RANDOM = -10  # Minimum value for random numbers
-    MAX_RANDOM = 10   # Maximum value for random numbers
+    MIN_RANDOM = -1000  # Minimum value for random numbers
+    MAX_RANDOM = 1000   # Maximum value for random numbers
     TEST_COUNT = 10000  # Number of random tests to run
     VERBOSE = False   # Set to True for detailed output of each test
 
-    current_system = RadixJMinus1System()
+    current_system = RadixJSqrt2System()
+
+    # # test conversion
+    c = complex(83, 479)
+    print(current_system.from_complex(c))
+    print(current_system.to_complex(current_system.from_complex(c)))
 
     # Example of testing specific values (uncomment and modify as needed)
     """
@@ -491,4 +841,13 @@ def run_tests():
         print(f"Success rate: {(TEST_COUNT - incorrect_count) / TEST_COUNT * 100:.2f}%")
 
 if __name__ == "__main__":
+    # Run the benchmark
+    # print("Starting benchmark...")
+    # run_benchmark(iterations=1000, num_runs=5, min_val=-10, max_val=10)
+    
+    # print("\n" + "=" * 80)
+    # print("Running original tests...")
+    # print("=" * 80)
+    
+    # Run the original tests
     run_tests()
