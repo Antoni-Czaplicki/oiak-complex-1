@@ -355,18 +355,62 @@ class RadixJMinus1System(ComplexNumberSystem):
         return result
 
     def add(self, a: List[int], b: List[int]) -> List[int]:
-        """Add two numbers in radix-j−1 system using native arithmetic"""
-        complex_a = self.to_complex(a)
-        complex_b = self.to_complex(b)
-        result_complex = complex_a + complex_b
-        return self.from_complex(result_complex)
+        """Add two numbers in radix-j−1 system using manual digit-wise algorithm"""
+        # reverse to least-significant-digit first
+        a_rev = a[::-1]
+        b_rev = b[::-1]
+        # allocate space for sums and carries
+        n = max(len(a_rev), len(b_rev)) + 5
+        carry2 = [0] * n
+        carry3 = [0] * n
+        res = [0] * n
+        for i in range(n):
+            x = a_rev[i] if i < len(a_rev) else 0
+            y = b_rev[i] if i < len(b_rev) else 0
+            s = x + y + carry2[i] + carry3[i]
+            z = s & 1
+            res[i] = z
+            c = (z - s) // 2
+            if c:
+                if i + 2 < n:
+                    carry2[i + 2] += c
+                if i + 3 < n:
+                    carry3[i + 3] += c
+        # remove leading zeros
+        while len(res) > 1 and res[-1] == 0:
+            res.pop()
+        # return most-significant-digit first
+        return res[::-1]
 
     def multiply(self, a: List[int], b: List[int]) -> List[int]:
-        """Multiply two numbers in radix-j−1 system using native arithmetic"""
-        complex_a = self.to_complex(a)
-        complex_b = self.to_complex(b)
-        result_complex = complex_a * complex_b
-        return self.from_complex(result_complex)
+        """Multiply two numbers in radix-j−1 system using manual digit-wise algorithm"""
+        # reverse inputs for convolution
+        a_rev = a[::-1]
+        b_rev = b[::-1]
+        m, p = len(a_rev), len(b_rev)
+        # convolution of digit products
+        conv = [0] * (m + p + 5)
+        for i, ai in enumerate(a_rev):
+            for j, bj in enumerate(b_rev):
+                conv[i + j] += ai * bj
+        n = len(conv)
+        carry2 = [0] * n
+        carry3 = [0] * n
+        res = [0] * n
+        for i in range(n):
+            s = conv[i] + carry2[i] + carry3[i]
+            z = s & 1
+            res[i] = z
+            c = (z - s) // 2
+            if c:
+                if i + 2 < n:
+                    carry2[i + 2] += c
+                if i + 3 < n:
+                    carry3[i + 3] += c
+        # remove leading zeros
+        while len(res) > 1 and res[-1] == 0:
+            res.pop()
+        return res[::-1]
 
     @property
     def name(self) -> str:
@@ -682,13 +726,13 @@ def run_benchmark(iterations: int = 1000, num_runs: int = 10,
     
 
 def run_tests():
-    OPERATION = "add"
+    OPERATION = "multiplication"
     MIN_RANDOM = -1000
     MAX_RANDOM = 1000
     TEST_COUNT = 1000
     VERBOSE = False
 
-    current_system = RadixJSqrt2System()
+    current_system = Radix2jSystem()
 
     c = complex(83, 479)
     print(current_system.from_complex(c))
