@@ -4,7 +4,7 @@ import time
 import statistics
 import csv
 from abc import ABC, abstractmethod
-from typing import Any, Tuple, List
+from typing import Any, Tuple, List, Union
 
 
 def rebase(num: int, base: int) -> tuple[list[int], bool]:
@@ -355,62 +355,93 @@ class RadixJMinus1System(ComplexNumberSystem):
         return result
 
     def add(self, a: List[int], b: List[int]) -> List[int]:
-        """Add two numbers in radix-j−1 system using manual digit-wise algorithm"""
-        # reverse to least-significant-digit first
+        """Add two numbers in radix-j−1 system using correct carry propagation"""
+        if not a:
+            return b[:]
+        if not b:
+            return a[:]
+        
+        # Reverse for easier processing (LSB first)
         a_rev = a[::-1]
         b_rev = b[::-1]
-        # allocate space for sums and carries
-        n = max(len(a_rev), len(b_rev)) + 5
-        carry2 = [0] * n
-        carry3 = [0] * n
-        res = [0] * n
-        for i in range(n):
-            x = a_rev[i] if i < len(a_rev) else 0
-            y = b_rev[i] if i < len(b_rev) else 0
-            s = x + y + carry2[i] + carry3[i]
-            z = s & 1
-            res[i] = z
-            c = (z - s) // 2
-            if c:
-                if i + 2 < n:
-                    carry2[i + 2] += c
-                if i + 3 < n:
-                    carry3[i + 3] += c
-        # remove leading zeros
-        while len(res) > 1 and res[-1] == 0:
-            res.pop()
-        # return most-significant-digit first
-        return res[::-1]
+        
+        # Pad to same length
+        max_len = max(len(a_rev), len(b_rev))
+        while len(a_rev) < max_len:
+            a_rev.append(0)
+        while len(b_rev) < max_len:
+            b_rev.append(0)
+        
+        # Result array with extra space for carries
+        result = [0] * (max_len + 4)
+        
+        # Add digit by digit from right to left
+        for i in range(max_len):
+            # Add current column including any existing carry
+            col_sum = a_rev[i] + b_rev[i] + result[i]
+            
+            # Handle sum according to base -1+i rules
+            if col_sum == 0:
+                result[i] = 0
+            elif col_sum == 1:
+                result[i] = 1
+            elif col_sum >= 2:
+                # Apply Penney's rule: each pair of 1s becomes 1100 pattern
+                pairs = col_sum // 2
+                remainder = col_sum % 2
+                
+                result[i] = remainder
+                
+                # Propagate carry pattern: 1100 (positions +2 and +3 get 1s)
+                if i + 2 < len(result):
+                    result[i + 2] += pairs
+                if i + 3 < len(result):
+                    result[i + 3] += pairs
+        
+        # Process any remaining carries
+        for i in range(len(result)):
+            if result[i] >= 2:
+                pairs = result[i] // 2
+                result[i] = result[i] % 2
+                
+                if i + 2 < len(result):
+                    result[i + 2] += pairs
+                if i + 3 < len(result):
+                    result[i + 3] += pairs
+        
+        # Remove leading zeros and reverse back to MSB first
+        while len(result) > 1 and result[-1] == 0:
+            result.pop()
+        
+        return result[::-1]
 
     def multiply(self, a: List[int], b: List[int]) -> List[int]:
-        """Multiply two numbers in radix-j−1 system using manual digit-wise algorithm"""
-        # reverse inputs for convolution
+        """Multiply two radix-(−1+i) numbers."""
+        if not a or not b:
+            return [0]
+        # Reverse for LSB-first convolution
         a_rev = a[::-1]
         b_rev = b[::-1]
-        m, p = len(a_rev), len(b_rev)
-        # convolution of digit products
-        conv = [0] * (m + p + 5)
-        for i, ai in enumerate(a_rev):
-            for j, bj in enumerate(b_rev):
-                conv[i + j] += ai * bj
-        n = len(conv)
-        carry2 = [0] * n
-        carry3 = [0] * n
-        res = [0] * n
-        for i in range(n):
-            s = conv[i] + carry2[i] + carry3[i]
-            z = s & 1
-            res[i] = z
-            c = (z - s) // 2
-            if c:
-                if i + 2 < n:
-                    carry2[i + 2] += c
-                if i + 3 < n:
-                    carry3[i + 3] += c
-        # remove leading zeros
-        while len(res) > 1 and res[-1] == 0:
-            res.pop()
-        return res[::-1]
+        # Initialize result length
+        result = [0] * (len(a_rev) + len(b_rev) + 4)
+        # Polynomial convolution
+        for i, da in enumerate(a_rev):
+            for j, db in enumerate(b_rev):
+                result[i + j] += da * db
+        # Carry clearing using 2 = b^2 + b^3
+        for k in range(len(result)):
+            if result[k] >= 2:
+                carry_pairs = result[k] // 2
+                result[k] %= 2
+                if k + 2 < len(result):
+                    result[k + 2] += carry_pairs
+                if k + 3 < len(result):
+                    result[k + 3] += carry_pairs
+        # Trim leading zeros and reverse
+        while len(result) > 1 and result[-1] == 0:
+            result.pop()
+        return result[::-1]
+
 
     @property
     def name(self) -> str:
@@ -447,7 +478,7 @@ class BinaryComplexSystem(ComplexNumberSystem):
         
         return max(bits_needed, self.min_bits)
 
-    def _int_to_binary(self, num: int, bits: int = None) -> List[int]:
+    def _int_to_binary(self, num: int, bits: Union[int, None] = None) -> List[int]:
         """Convert integer to binary list using two's complement with specified bit width"""
         if bits is None:
             bits = self._calculate_bits_needed(num)
@@ -726,20 +757,20 @@ def run_benchmark(iterations: int = 1000, num_runs: int = 10,
     
 
 def run_tests():
-    OPERATION = "multiplication"
+    OPERATION = "multiply"
     MIN_RANDOM = -1000
     MAX_RANDOM = 1000
     TEST_COUNT = 1000
     VERBOSE = False
 
-    current_system = Radix2jSystem()
+    current_system = RadixJMinus1System()
 
-    c = complex(83, 479)
+    c = complex(2, 0)
     print(current_system.from_complex(c))
     print(current_system.to_complex(current_system.from_complex(c)))
 
-    z1 = complex(7, -5)
-    z2 = complex(0, -1)
+    z1 = complex(2, -5)
+    z2 = complex(0, -7)
     if OPERATION == "add":
         expected = z1 + z2
         operation_symbol = "+"
@@ -790,7 +821,7 @@ def run_tests():
 
             if VERBOSE:
                 print(f"{z_a} {operation_symbol} {z_b} = {expected_result}")
-                print(f"Radix-2j result: {result}")
+                print(f"{current_system.name} result: {result}")
                 print(f"Correct: {is_correct}")
                 print()
 
@@ -799,6 +830,7 @@ def run_tests():
                 if not VERBOSE:
                     print(f"Error case: {z_a} {operation_symbol} {z_b}")
                     print(f"Expected: {expected_result}, Got: {result}")
+                    print(f"{current_system.name} representation: {r2j_a} {operation_symbol} {r2j_b} = {ts_result}")
                     print()
 
         except Exception as e:
